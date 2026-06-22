@@ -2,7 +2,7 @@ name: 虎牙虎粮自动发放
 
 on:
   schedule:
-    - cron: '30 16 * * *'  # 北京时间 00:01
+    - cron: '30 0 * * *' 
   workflow_dispatch:
     inputs:
       rooms:
