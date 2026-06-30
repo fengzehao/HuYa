@@ -62,9 +62,10 @@ class HuYaAuto:
         print("[PUSH] 正在发送推送通知...")
         try:
             content = "\n\n".join(self.msg_logs)
+            title = "虎牙自动任务失败" if "失败" in content else "虎牙自动任务成功"
             url = f"https://sctapi.ftqq.com/{self.send_key}.send"
             data = {
-                "title": "虎牙自动任务报告",
+                "title": title,
                 "desp": content
             }
             res = requests.post(url, data=data, timeout=10)
