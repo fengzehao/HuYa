@@ -3,13 +3,6 @@ name: 虎牙虎粮自动发放
 on:
   schedule:
     - cron: '30 16 * * *'  # 北京时间 00:01 
-  workflow_dispatch:
-    inputs:
-      rooms:
-        description: '房间号，逗号分隔'
-        required: false
-        default: ''
-
 jobs:
   send-hl:
     runs-on: ubuntu-latest
@@ -46,30 +39,15 @@ jobs:
             echo "❌ 未配置 HUYA_COOKIE"
             exit 1
           fi
-
-      # 获取房间号
-      - name: 获取房间号
-        id: get-rooms
-        run: |
-          if [ -n "${{ github.event.inputs.rooms }}" ]; then
-            echo "rooms=${{ github.event.inputs.rooms }}" >> $GITHUB_OUTPUT
-          else
-            if [ -z "${{ secrets.HUYA_ROOMS }}" ]; then
-              echo "❌ 未配置 HUYA_ROOMS"
-              exit 1
-            fi
-            echo "rooms=${{ secrets.HUYA_ROOMS }}" >> $GITHUB_OUTPUT
-          fi
-
-
+      
       # ==============================================
       # ✅ 启动虚拟桌面 + 运行脚本（GitHub 自带 Chrome，不用装！）
       # ==============================================
       - name: 运行虎粮发放
         env:
           HUYA_COOKIE: ${{ secrets.HUYA_COOKIE }}
-          HUYA_ROOMS: ${{ steps.get-rooms.outputs.rooms }}
-          SEND_KEY: ${{ secrets.SEND_KEY }}  # <--- 补上这一行，脚本才能读到推送 Key
+          HUYA_ROOMS: ${{ secrets.HUYA_ROOMS }}
+          SEND_KEY: ${{ secrets.SEND_KEY }}
           HEADLESS: "true"
         run: |
           xvfb-run -a python main.py
