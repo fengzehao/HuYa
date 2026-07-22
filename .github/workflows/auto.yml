@@ -45,15 +45,30 @@ jobs:
             echo "❌ 未配置 HUYA_COOKIE"
             exit 1
           fi
-      
+
+      # 获取房间号
+      - name: 获取房间号
+        id: get-rooms
+        run: |
+          if [ -n "${{ github.event.inputs.rooms }}" ]; then
+            echo "rooms=${{ github.event.inputs.rooms }}" >> $GITHUB_OUTPUT
+          else
+            if [ -z "${{ secrets.HUYA_ROOMS }}" ]; then
+              echo "❌ 未配置 HUYA_ROOMS"
+              exit 1
+            fi
+            echo "rooms=${{ secrets.HUYA_ROOMS }}" >> $GITHUB_OUTPUT
+          fi
+
+
       # ==============================================
       # ✅ 启动虚拟桌面 + 运行脚本（GitHub 自带 Chrome，不用装！）
       # ==============================================
       - name: 运行虎粮发放
         env:
           HUYA_COOKIE: ${{ secrets.HUYA_COOKIE }}
-          HUYA_ROOMS: ${{ secrets.HUYA_ROOMS }}
-          SEND_KEY: ${{ secrets.SEND_KEY }}
+          HUYA_ROOMS: ${{ steps.get-rooms.outputs.rooms }}
+          SEND_KEY: ${{ secrets.SEND_KEY }}  # <--- 补上这一行，脚本才能读到推送 Key
           HEADLESS: "true"
         run: |
           xvfb-run -a python main.py
