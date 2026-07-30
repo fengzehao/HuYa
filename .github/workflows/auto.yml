@@ -12,6 +12,7 @@ on:
 jobs:
   send-hl:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
@@ -28,11 +29,13 @@ jobs:
         with:
           python-version: '3.10'
 
-      # ==============================================
-      # ✅ 关键：只装虚拟桌面，不装整个 GNOME 桌面！
-      # ==============================================
-      - name: 安装虚拟显示
-        run: sudo apt-get install -y xvfb
+      # 用系统包管理器装 Chrome + Driver，版本自动匹配，不再走 ChromeDriverManager 下载
+      - name: 安装 Chrome & ChromeDriver
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq chromium-browser chromium-chromedriver > /dev/null
+          echo "CHROME_BIN=$(which chromium-browser)" >> $GITHUB_ENV
+          echo "CHROMEDRIVER_BIN=$(which chromedriver)" >> $GITHUB_ENV
 
       # 安装依赖
       - name: 安装 Python 包
