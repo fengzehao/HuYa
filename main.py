@@ -57,6 +57,9 @@ class HuYaAuto:
         opts.add_argument('--no-first-run')
         opts.add_argument('--window-size=1920,1080')
         opts.add_argument('--disable-blink-features=AutomationControlled')
+        opts.add_argument('--blink-settings=imagesEnabled=false')
+        opts.add_argument('--disable-features=VizDisplayCompositor,TranslateUI')
+        opts.add_argument('--disable-ipc-flooding-protection')
         opts.add_argument(
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
             'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
@@ -68,14 +71,18 @@ class HuYaAuto:
             opts.binary_location = binary_path
 
         driver = webdriver.Chrome(service=Service(driver_path), options=opts)
-        driver.set_page_load_timeout(60)
-        driver.set_script_timeout(30)
+        driver.set_page_load_timeout(120)
+        driver.set_script_timeout(60)
+        driver.execute_cdp_cmd('Network.setBlockedURLs', {
+            'urls': ['*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp',
+                 '*.woff', '*.woff2', '*.ttf', '*.mp4', '*.flv', '*.m3u8']
+        })
+        driver.execute_cdp_cmd('Network.enable', {})
         return driver
 
-    def _wait_page_ready(self, timeout=15):
-        """等待页面 DOM 完全加载，替代 time.sleep"""
+    def _wait_page_ready(self, timeout=30):
         WebDriverWait(self.driver, timeout).until(
-            lambda d: d.execute_script("return document.readyState") == "complete"
+            lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
         )
 
     def send_notification(self):
@@ -102,6 +109,8 @@ class HuYaAuto:
         for attempt in range(1, retries + 1):
             try:
                 self.driver.get(cfg.URLS["user_index"])
+            except TimeoutException:
+                print(f"[WARN] 页面加载超时，尝试继续执行...")
                 self._wait_page_ready()
 
                 for line in self.cookie.split(';'):
@@ -124,7 +133,7 @@ class HuYaAuto:
             except (TimeoutException, WebDriverException) as e:
                 print(f"[WARN] 第 {attempt}/{retries} 次登录失败: {e}")
                 if attempt < retries:
-                    time.sleep(3)
+                    time.sleep(5)
 
         print("[ERROR] 登录最终失败")
         return False
