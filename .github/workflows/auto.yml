@@ -12,30 +12,28 @@ on:
 jobs:
   send-hl:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
-
-      # 缓存 Python 依赖（超级提速）
+        
+      - name: 设置 Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+          
       - name: 缓存 Python 依赖
         uses: actions/cache@v5
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-
-      - name: 设置 Python 3.10
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.10'
-
-      # 用系统包管理器装 Chrome + Driver，版本自动匹配，不再走 ChromeDriverManager 下载
-      - name: 安装 Chrome & ChromeDriver
+          
+      - name: 确认浏览器环境
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq chromium-browser chromium-chromedriver > /dev/null
-          echo "CHROME_BIN=$(which chromium-browser)" >> $GITHUB_ENV
-          echo "CHROMEDRIVER_BIN=$(which chromedriver)" >> $GITHUB_ENV
+          google-chrome --version
+          chromedriver --version
+          echo "CHROME_BIN=/usr/bin/google-chrome" >> $GITHUB_ENV
+          echo "CHROMEDRIVER_BIN=/usr/local/bin/chromedriver" >> $GITHUB_ENV
 
       # 安装依赖
       - name: 安装 Python 包
@@ -67,7 +65,6 @@ jobs:
         env:
           HUYA_COOKIE: ${{ secrets.HUYA_COOKIE }}
           HUYA_ROOMS: ${{ steps.get-rooms.outputs.rooms }}
-          SEND_KEY: ${{ secrets.SEND_KEY }}  # <--- 补上这一行，脚本才能读到推送 Key
-          HEADLESS: "true"
+          SEND_KEY: ${{ secrets.SEND_KEY }}
         run: |
           python main.py
