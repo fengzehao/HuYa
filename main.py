@@ -13,7 +13,6 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 
 import config as cfg
 
@@ -42,16 +41,26 @@ class HuYaAuto:
         return [int(s.strip()) for s in rooms_str.split(',') if s.strip().isdigit()]
 
     def _init_browser(self):
-        chrome_options = Options()
-        if not self.debug: 
-            chrome_options.add_argument('--headless=new')
+        opts = Options()
+        if not self.debug:
+            opts.add_argument('--headless=new')
+        opts.add_argument('--no-sandbox')
+        opts.add_argument('--disable-dev-shm-usage')
+        opts.add_argument('--disable-gpu')
+        opts.add_argument('--disable-extensions')
+        opts.add_argument('--disable-background-networking')
+        opts.add_argument('--disable-sync')
+        opts.add_argument('--no-first-run')
+        opts.add_argument('--window-size=1920,1080')
+        opts.add_argument('--disable-blink-features=AutomationControlled')
         
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        driver_path = os.getenv('CHROMEDRIVER_BIN', '/usr/bin/chromedriver')
+        binary_path = os.getenv('CHROME_BIN', '/usr/bin/chromium-browser')
+        opts.binary_location = binary_path
+
+        driver = webdriver.Chrome(service=Service(driver_path), options=opts)
+        driver.set_page_load_timeout(60)
+        driver.set_script_timeout(30)
         return driver
 
     def send_notification(self):
