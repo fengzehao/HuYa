@@ -65,7 +65,11 @@ class HuYaAuto:
             'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
         )
         
-        driver_path = os.getenv('CHROMEDRIVER_BIN', '/usr/bin/chromedriver')
+        driver_path = (
+            os.getenv('CHROMEDRIVER_BIN')
+            or os.path.join(os.getenv('CHROMEWEBDRIVER', ''), 'chromedriver')
+            or '/usr/local/share/chrome_driver/chromedriver'
+        )
         binary_path = os.getenv('CHROME_BIN', '/usr/bin/chromium-browser')
         if os.path.isfile(binary_path):
             opts.binary_location = binary_path
