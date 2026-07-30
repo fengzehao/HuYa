@@ -31,9 +31,9 @@ jobs:
       - name: 确认浏览器环境
         run: |
           google-chrome --version
-          chromedriver --version
+          ${CHROMEWEBDRIVER}/chromedriver --version
           echo "CHROME_BIN=/usr/bin/google-chrome" >> $GITHUB_ENV
-          echo "CHROMEDRIVER_BIN=/usr/local/bin/chromedriver" >> $GITHUB_ENV
+          echo "CHROMEDRIVER_BIN=${CHROMEWEBDRIVER}/chromedriver" >> $GITHUB_ENV
 
       # 安装依赖
       - name: 安装 Python 包
