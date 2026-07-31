@@ -38,7 +38,8 @@ class HuYaAuto:
         self.wait = WebDriverWait(self.driver, 20)
 
     def _parse_rooms(self, rooms_str):
-        if not rooms_str: return []
+        if not rooms_str: 
+            return []
         return [int(s.strip()) for s in rooms_str.split(',') if s.strip().isdigit()]
 
     def _init_browser(self):
@@ -65,25 +66,27 @@ class HuYaAuto:
             'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
         )
         
+        binary_path = os.getenv('CHROME_BIN', '/usr/bin/google-chrome')
+        if os.path.isfile(binary_path):
+            opts.binary_location = binary_path
+
         driver_path = (
             os.getenv('CHROMEDRIVER_BIN')
             or os.path.join(os.getenv('CHROMEWEBDRIVER', ''), 'chromedriver')
-            or '/usr/local/share/chrome_driver/chromedriver'
+            or '/usr/local/share/chromedriver-linux64/chromedriver'
         )
-        binary_path = os.getenv('CHROME_BIN', '/usr/bin/chromium-browser')
-        if os.path.isfile(binary_path):
-            opts.binary_location = binary_path
 
         driver = webdriver.Chrome(service=Service(driver_path), options=opts)
         driver.set_page_load_timeout(120)
         driver.set_script_timeout(60)
+        
         driver.execute_cdp_cmd('Network.setBlockedURLs', {
             'urls': ['*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp',
                  '*.woff', '*.woff2', '*.ttf', '*.mp4', '*.flv', '*.m3u8']
         })
         driver.execute_cdp_cmd('Network.enable', {})
         return driver
-
+        
     def _wait_page_ready(self, timeout=30):
         WebDriverWait(self.driver, timeout).until(
             lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
@@ -112,11 +115,11 @@ class HuYaAuto:
         print("[LOGIN] 正在登录...")
         for attempt in range(1, retries + 1):
             try:
-                self.driver.get(cfg.URLS["user_index"])
-            except TimeoutException:
-                print(f"[WARN] 页面加载超时，尝试继续执行...")
-                self._wait_page_ready()
-
+                try:
+                    self.driver.get("https://www.huya.com/robots.txt")
+                except TimeoutException:
+                    pass
+                injected = 0
                 for line in self.cookie.split(';'):
                     if '=' not in line:
                         continue
@@ -127,18 +130,22 @@ class HuYaAuto:
                         'domain': '.huya.com',
                         'path': '/',
                     })
-
-                self.driver.refresh()
+                    injected += 1
+                print(f"[LOGIN] 已注入 {injected} 条 cookie")
+                try:
+                    self.driver.get(cfg.URLS["user_index"])
+                except TimeoutException:
+                    print("[WARN] 用户中心加载超时，尝试继续...")
+                self._wait_page_ready(timeout=30)
                 self.wait.until(
                     EC.presence_of_element_located((By.ID, cfg.LOGIN["huya_num"]))
                 )
                 print("[SUCCESS] 登录成功")
                 return True
-            except (TimeoutException, WebDriverException) as e:
-                print(f"[WARN] 第 {attempt}/{retries} 次登录失败: {e}")
+            except Exception as e:
+                print(f"[WARN] 第 {attempt}/{retries} 次登录失败: {type(e).__name__}: {e}")
                 if attempt < retries:
                     time.sleep(5)
-
         print("[ERROR] 登录最终失败")
         return False
 
