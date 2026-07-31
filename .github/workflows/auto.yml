@@ -67,4 +67,4 @@ jobs:
           HUYA_ROOMS: ${{ steps.get-rooms.outputs.rooms }}
           SEND_KEY: ${{ secrets.SEND_KEY }}
         run: |
-          python main.py
+          python test.py
