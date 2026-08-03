@@ -20,8 +20,7 @@ import config as cfg
 class HuYaAuto:
     def __init__(self):
         # ============ 配置项 ============
-        self.debug = False  # 开启调试
-        self.enable_push = True  # 推送开关已开启
+        self.enable_push = True
         # ================================
         
         self.msg_logs = []
@@ -44,8 +43,7 @@ class HuYaAuto:
 
     def _init_browser(self):
         opts = Options()
-        if not self.debug:
-            opts.add_argument('--headless=new')
+        opts.add_argument('--headless=new')
         opts.add_argument('--no-sandbox')
         opts.add_argument('--disable-dev-shm-usage')
         opts.add_argument('--disable-gpu')
@@ -172,8 +170,8 @@ class HuYaAuto:
             count = int(n) if n else 0
             print(f"[COUNT] 识别到虎粮: {count}")
             return count
-        except: 
-            print("[ERROR] 虎粮数量识别失败")
+        except Exception as e: 
+            print("[ERROR] 虎粮数量识别失败: {type(e).__name__}: {e}")
             return 0
 
     def send_to_room_in_situ(self, rid, count):
@@ -224,8 +222,7 @@ class HuYaAuto:
             time.sleep(8) 
             return f"🚀 房间 {rid} 送出虎粮 {count} 个"
         except Exception as e:
-            if self.debug: 
-                print(f"  [DEBUG] 送礼异常: {e}")
+            print(f"[ERROR] 送礼异常: {type(e).__name__}: {e}")
             return "❌ 过程异常"
 
     def daily_check_in(self, rid):
@@ -250,7 +247,7 @@ class HuYaAuto:
 
     def run(self):
         print("=" * 40)
-        print(f"[HUYA] 虎牙自动任务启动 (Debug: {self.debug})")
+        print(f"[HUYA] 虎牙自动任务启动")
         print("=" * 40)
         try:
             if not self.login(): 
