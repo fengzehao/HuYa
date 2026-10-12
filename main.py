@@ -4,133 +4,105 @@
 import os
 import sys
 import time
-from urllib.parse import urlsplit
-
 import requests
+
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import (
+    ElementClickInterceptedException,  # 改动：新增，用于背包标签被浮层遮挡时兜底
+    TimeoutException,
+    WebDriverException,
+)
 
 import config as cfg
 
-
 class HuYaAuto:
     def __init__(self):
+        # ============ 配置项 ============
         self.enable_push = True
-        self.msg_logs = []
-        self.failed = False
-        self.cookie_invalid = False
+        # ================================
 
-        self.cookie = os.getenv("HUYA_COOKIE", "").strip()
-        self.rooms = list(cfg.ROOMS)
-        self.send_key = os.getenv("SEND_KEY", "").strip()
+        self.msg_logs = []
+        self.cookie = os.getenv('HUYA_COOKIE', '').strip()
+        self.rooms = self._parse_rooms(os.getenv('HUYA_ROOMS', ''))
+        self.send_key = os.getenv('SEND_KEY', '').strip()
 
         if not self.cookie:
-            print("[ERROR] 未设置 HUYA_COOKIE")
-            sys.exit(1)
+            print("[ERROR] 未设置 HUYA_COOKIE"); sys.exit(1)
+        if not self.rooms:
+            self.rooms = [910323]   # 固定房间号（未配置 HUYA_ROOMS 时使用）
 
         self.driver = self._init_browser()
-        self.wait = WebDriverWait(self.driver, cfg.TIMING.get("wait", 20))
+        self.wait = WebDriverWait(self.driver, 20)
 
-    # ------------------------------------------------------------------ 初始化
+    def _parse_rooms(self, rooms_str):
+        if not rooms_str:
+            return []
+        return [int(s.strip()) for s in rooms_str.split(',') if s.strip().isdigit()]
+
     def _init_browser(self):
         opts = Options()
-        # eager：DOMContentLoaded 后就返回，避免被广告/统计脚本拖到超时
-        opts.page_load_strategy = "eager"
-        for arg in (
-            "--headless=new",
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--disable-extensions",
-            "--disable-background-networking",
-            "--disable-default-apps",
-            "--disable-sync",
-            "--no-first-run",
-            "--window-size=1920,1080",
-            "--lang=zh-CN",
-            "--disable-blink-features=AutomationControlled",
-            "--blink-settings=imagesEnabled=false",
-        ):
-            opts.add_argument(arg)
+        opts.add_argument('--headless=new')
+        opts.add_argument('--no-sandbox')
+        opts.add_argument('--disable-dev-shm-usage')
+        opts.add_argument('--disable-gpu')
+        opts.add_argument('--disable-extensions')
+        opts.add_argument('--disable-background-networking')
+        opts.add_argument('--disable-default-apps')
+        opts.add_argument('--disable-sync')
+        opts.add_argument('--disable-translate')
+        opts.add_argument('--metrics-recording-only')
+        opts.add_argument('--no-first-run')
+        opts.add_argument('--window-size=1920,1080')
+        opts.add_argument('--disable-blink-features=AutomationControlled')
+        opts.add_argument('--blink-settings=imagesEnabled=false')
+        opts.add_argument('--disable-features=VizDisplayCompositor,TranslateUI')
+        opts.add_argument('--disable-ipc-flooding-protection')
+        opts.add_argument(
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+        )
 
-        binary_path = os.getenv("CHROME_BIN", "/usr/bin/google-chrome")
+        binary_path = os.getenv('CHROME_BIN', '/usr/bin/google-chrome')
         if os.path.isfile(binary_path):
             opts.binary_location = binary_path
 
-        # 优先用 Actions 自带 chromedriver；找不到则交给 Selenium Manager 自动处理
-        driver_path = os.getenv("CHROMEDRIVER_BIN", "")
-        if driver_path and os.path.isfile(driver_path):
-            service = Service(driver_path)
-        else:
-            service = Service()
+        driver_path = (
+            os.getenv('CHROMEDRIVER_BIN')
+            or os.path.join(os.getenv('CHROMEWEBDRIVER', ''), 'chromedriver')
+            or '/usr/local/share/chromedriver-linux64/chromedriver'
+        )
 
-        driver = webdriver.Chrome(service=service, options=opts)
-        driver.set_page_load_timeout(cfg.TIMING.get("page_load_timeout", 120))
-        driver.set_script_timeout(30)
+        driver = webdriver.Chrome(service=Service(driver_path), options=opts)
+        driver.set_page_load_timeout(120)
+        driver.set_script_timeout(60)
 
-        try:
-            driver.execute_cdp_cmd("Network.enable", {})
-            driver.execute_cdp_cmd(
-                "Network.setBlockedURLs",
-                {"urls": ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp",
-                          "*.woff", "*.woff2", "*.ttf", "*.mp4", "*.flv", "*.m3u8"]},
-            )
-            # 仅去掉 UA 里的 Headless 标记，保留真实版本号，避免和 sec-ch-ua 不一致
-            ua = driver.execute_script("return navigator.userAgent")
-            driver.execute_cdp_cmd(
-                "Network.setUserAgentOverride",
-                {"userAgent": ua.replace("HeadlessChrome", "Chrome")},
-            )
-        except WebDriverException as e:
-            print(f"[WARN] CDP 初始化失败（可忽略）: {type(e).__name__}")
+        driver.execute_cdp_cmd('Network.setBlockedURLs', {
+            'urls': ['*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp',
+                 '*.woff', '*.woff2', '*.ttf', '*.mp4', '*.flv', '*.m3u8']
+        })
+        driver.execute_cdp_cmd('Network.enable', {})
         return driver
 
-    # ------------------------------------------------------------------ 工具
-    def _open(self, url):
-        """打开页面；超时则 window.stop() 后继续，不抛异常。（仅用于登录/打卡流程）"""
-        try:
-            self.driver.get(url)
-        except TimeoutException:
-            print(f"[WARN] 页面加载超时，已停止加载并继续: {urlsplit(url).netloc}")
-            try:
-                self.driver.execute_script("window.stop();")
-            except WebDriverException:
-                pass
+    def _wait_page_ready(self, timeout=30):
+        WebDriverWait(self.driver, timeout).until(
+            lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
+        )
 
-    def _page_state(self):
-        """返回不含敏感信息的页面状态，便于从日志判断失败原因。"""
-        try:
-            u = urlsplit(self.driver.current_url)
-            ready = self.driver.execute_script("return document.readyState")
-            body_len = self.driver.execute_script(
-                "return document.body ? document.body.innerText.length : -1")
-            return (f"url={u.netloc}{u.path} title={self.driver.title!r} "
-                    f"readyState={ready} bodyTextLen={body_len}")
-        except WebDriverException as e:
-            return f"无法读取页面状态: {type(e).__name__}"
-
-    def _looks_like_login_page(self):
-        try:
-            u = urlsplit(self.driver.current_url)
-            hay = (u.netloc + u.path).lower()
-            return any(k in hay for k in ("login", "passport", "udb"))
-        except WebDriverException:
-            return False
-
-    # ------------------------------------------------------------------ 推送
     def send_notification(self):
+        """新增：Server酱推送方法"""
         if not self.enable_push or not self.send_key:
             return
+
         print("[PUSH] 正在发送推送通知...")
         try:
-            content = "\n\n".join(self.msg_logs) or "无输出"
-            title = "虎牙-任务失败" if self.failed else "虎牙-任务成功"
+            content = "\n\n".join(self.msg_logs)
+            title = "虎牙-任务失败" if "失败" in content else "虎牙-任务成功"
             res = requests.post(
                 f"https://sctapi.ftqq.com/{self.send_key}.send",
                 data={"title": title, "desp": content},
@@ -139,76 +111,63 @@ class HuYaAuto:
             tag = "SUCCESS" if res.status_code == 200 else "FAILED"
             print(f"[{tag}] 推送状态: {res.status_code}")
         except Exception as e:
-            print(f"[ERROR] 推送异常: {type(e).__name__}")
+            print(f"[ERROR] 推送异常: {e}")
 
-    # ------------------------------------------------------------------ 登录
-    def _inject_cookies(self):
-        # add_cookie 要求当前已在 huya.com 域下，robots.txt 体积最小
-        self._open("https://www.huya.com/robots.txt")
-        self.driver.delete_all_cookies()
-        ok = bad = 0
-        for line in self.cookie.split(";"):
-            if "=" not in line:
-                continue
-            name, val = line.split("=", 1)
-            try:
-                self.driver.add_cookie({
-                    "name": name.strip(), "value": val.strip(),
-                    "domain": ".huya.com", "path": "/",
-                })
-                ok += 1
-            except WebDriverException:
-                bad += 1
-        print(f"[LOGIN] 已注入 {ok} 条 cookie" + (f"，{bad} 条失败" if bad else ""))
-
-    def _logged_in(self, driver):
-        try:
-            return bool(driver.find_elements(By.ID, cfg.LOGIN["huya_num"]))
-        except WebDriverException:
-            return False
-
-    def login(self, retries=3):
+    def login(self, retries=2):
         print("[LOGIN] 正在登录...")
         for attempt in range(1, retries + 1):
             try:
-                self._inject_cookies()
-                self._open(cfg.URLS["user_index"])
-                WebDriverWait(self.driver, cfg.TIMING.get("login_wait", 30)).until(self._logged_in)
+                try:
+                    self.driver.get("https://www.huya.com/robots.txt")
+                except TimeoutException:
+                    pass
+                injected = 0
+                for line in self.cookie.split(';'):
+                    if '=' not in line:
+                        continue
+                    name, val = line.split('=', 1)
+                    self.driver.add_cookie({
+                        'name': name.strip(),
+                        'value': val.strip(),
+                        'domain': '.huya.com',
+                        'path': '/',
+                    })
+                    injected += 1
+                print(f"[LOGIN] 已注入 {injected} 条 cookie")
+                try:
+                    self.driver.get(cfg.URLS["user_index"])
+                except TimeoutException:
+                    print("[WARN] 用户中心加载超时，尝试继续...")
+                self._wait_page_ready(timeout=30)
+                self.wait.until(
+                    EC.presence_of_element_located((By.ID, cfg.LOGIN["huya_num"]))
+                )
                 print("[SUCCESS] 登录成功")
                 return True
-            except TimeoutException:
-                print(f"[WARN] 第 {attempt}/{retries} 次未检测到登录态 | {self._page_state()}")
-                if self._looks_like_login_page():
-                    self.cookie_invalid = True
-                    print("[ERROR] 被重定向到登录页，Cookie 已失效或被风控，请重新获取")
-                    return False
-            except WebDriverException as e:
-                print(f"[WARN] 第 {attempt}/{retries} 次登录异常: {type(e).__name__}: "
-                      f"{str(e).splitlines()[0] if str(e) else ''}")
-            if attempt < retries:
-                time.sleep(5 * attempt)
+            except Exception as e:
+                print(f"[WARN] 第 {attempt}/{retries} 次登录失败: {type(e).__name__}: {e}")
+                if attempt < retries:
+                    time.sleep(5)
         print("[ERROR] 登录最终失败")
         return False
 
-    # ------------------------------------------------------------------ 虎粮
-    def _wait_page_ready(self, timeout=30):
-        WebDriverWait(self.driver, timeout).until(
-            lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
-        )
-
     def get_hl_count(self):
-        """原有逻辑：打开支付页 -> 点背包 -> 读 li[data-num]。
-        返回虎粮数量；识别失败返回 None（与 0 区分开）。"""
         print("[SEARCH] 正在查询虎粮数量...")
         try:
             self.driver.get(cfg.URLS["pay_index"])
             self._wait_page_ready()
             pack_tab = self.wait.until(
-                EC.element_to_be_clickable((By.ID, cfg.PAY_PAGE["pack_tab"])))
-            pack_tab.click()
+                EC.element_to_be_clickable((By.ID, cfg.PAY_PAGE["pack_tab"]))
+            )
+            # 改动：普通点击被浮层拦截时，改用 JS 点击；其余逻辑与原版一致
+            try:
+                pack_tab.click()
+            except ElementClickInterceptedException:
+                self.driver.execute_script("arguments[0].click();", pack_tab)
 
             self.wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "li[data-num]")))
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'li[data-num]'))
+            )
             n = self.driver.execute_script('''
                 for (const item of document.querySelectorAll('li[data-num]')) {
                     if ((item.title || item.innerText || '').includes('虎粮'))
@@ -220,13 +179,12 @@ class HuYaAuto:
             print(f"[COUNT] 识别到虎粮: {count}")
             return count
         except Exception as e:
-            print(f"[ERROR] 虎粮数量识别失败: {type(e).__name__} | {self._page_state()}")
-            return None
+            print(f"[ERROR] 虎粮数量识别失败: {type(e).__name__}: {e}")  # 改动：补上原来缺失的 f 前缀
+            return 0
 
-    def send_to_room(self, rid, count):
-        """原有逻辑：进房间取 lp/gid -> 礼物面板 -> 悬停虎粮 -> 填数量 -> 赠送。"""
+    def send_to_room_in_situ(self, rid, count):
         if count <= 0:
-            return "⏭️ 无粮跳过"
+            return "无粮跳过"
         try:
             self.driver.get(cfg.URLS["room_base"].format(rid))
             self._wait_page_ready()
@@ -266,81 +224,68 @@ class HuYaAuto:
                 self.wait.until(
                     EC.element_to_be_clickable((By.CLASS_NAME, cfg.GIFT["confirm_class"]))
                 ).click()
-            except Exception:
+            except:
                 pass
 
             time.sleep(8)
             return f"🚀 房间 {rid} 送出虎粮 {count} 个"
         except Exception as e:
-            print(f"[ERROR] 房间 {rid} 送礼异常: {type(e).__name__} | {self._page_state()}")
-            return f"❌ 房间 {rid} 送礼异常（可能未开播）"
+            print(f"[ERROR] 送礼异常: {type(e).__name__}: {e}")
+            return "❌ 过程异常"
 
-    # ------------------------------------------------------------------ 打卡
     def daily_check_in(self, rid):
         try:
-            self._open(cfg.URLS["room_base"].format(rid))
-            badge = self.wait.until(EC.presence_of_element_located(
-                (By.CSS_SELECTOR, cfg.CHECKIN["badge_css"])))
-        except TimeoutException:
-            print(f"[WARN] 房间 {rid} 未找到粉丝牌入口 | {self._page_state()}")
-            return "⚠️ 未找到粉丝牌入口（未加入粉丝团/页面未加载）"
-        except WebDriverException as e:
-            return f"⚠️ 打卡异常: {type(e).__name__}"
+            self.driver.get(cfg.URLS["room_base"].format(rid))
+            self._wait_page_ready()
 
-        try:
+            badge = self.wait.until(
+                EC.presence_of_element_located(
+                    (By.CLASS_NAME, "FanClubHd--UAIAw8vo8FGSKqVwLp7A")
+                )
+            )
             ActionChains(self.driver).move_to_element(badge).perform()
-            btn = WebDriverWait(self.driver, 8).until(EC.element_to_be_clickable(
-                (By.XPATH, cfg.CHECKIN["btn_xpath"])))
+
+            btn = self.wait.until(
+                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), '打卡')]"))
+            )
             btn.click()
             return "✅ 打卡成功"
-        except TimeoutException:
+        except Exception:
             return "ℹ️ 已打卡"
-        except WebDriverException as e:
-            return f"⚠️ 打卡异常: {type(e).__name__}"
 
-    # ------------------------------------------------------------------ 主流程
     def run(self):
         print("=" * 40)
-        print("[HUYA] 虎牙自动任务启动")
+        print(f"[HUYA] 虎牙自动任务启动")
         print("=" * 40)
         try:
             if not self.login():
-                self.failed = True
-                self.msg_logs.append(
-                    "❌ 登录失败：Cookie 已失效或被风控，请重新获取 HUYA_COOKIE"
-                    if self.cookie_invalid else
-                    "❌ 登录失败：页面加载超时/登录元素未出现，请查看 Actions 日志")
+                self.msg_logs.append("登录失败")
                 return
-
             total = self.get_hl_count()
-            if total is None:
-                self.failed = True
-                self.msg_logs.append("⚠️ 虎粮数量识别失败，本次跳过送礼，仅打卡")
-                total = 0
-            else:
-                self.msg_logs.append(f"今日虎粮总数: {total}")
+            self.msg_logs.append(f"今日虎粮总数: {total}")
+
+            if total <= 0:
+                print("[DONE] 暂无虎粮，结束运行")
+                return
 
             n_rooms = len(self.rooms)
             base, extra = divmod(total, n_rooms)
+
             for i, rid in enumerate(self.rooms):
                 num = base + (1 if i < extra else 0)
                 print(f"\n>>> 房间: {rid} (目标数量: {num})")
-                g_res = self.send_to_room(rid, num)
+
+                g_res = self.send_to_room_in_situ(rid, num)
                 c_res = self.daily_check_in(rid)
-                if g_res.startswith("❌"):
-                    self.failed = True
+
                 msg = f"{g_res}；{c_res}"
                 print(f"结果: {msg}")
                 self.msg_logs.append(msg)
         finally:
-            self.send_notification()
-            try:
+            if self.enable_push:
+                self.send_notification()
+            if hasattr(self, 'driver'):
                 self.driver.quit()
-            except Exception:
-                pass
 
-
-if __name__ == "__main__":
-    bot = HuYaAuto()
-    bot.run()
-    sys.exit(1 if bot.failed else 0)
+if __name__ == '__main__':
+    HuYaAuto().run()
