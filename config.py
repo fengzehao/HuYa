@@ -41,7 +41,7 @@ URLS = {
 
 # 超时（秒）
 TIMING = {
-    "page_load_timeout": 45,  # 单次 driver.get 上限；超时后 window.stop() 继续，不再傻等 120 秒
-    "login_wait": 30,         # 等待登录态元素出现
+    "page_load_timeout": 120,  # 单次 driver.get 上限（与原版一致）
+    "login_wait": 30,          # 等待登录态元素出现
     "wait": 20,               # 通用显式等待
 }
