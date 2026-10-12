@@ -8,7 +8,11 @@ from urllib.parse import urlsplit
 
 import requests
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import (
+    ElementClickInterceptedException,
+    TimeoutException,
+    WebDriverException,
+)
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.action_chains import ActionChains
@@ -29,7 +33,6 @@ class HuYaAuto:
         self.cookie = os.getenv("HUYA_COOKIE", "").strip()
         self.rooms = list(cfg.ROOMS)
         self.send_key = os.getenv("SEND_KEY", "").strip()
-        self.proxy = os.getenv("HUYA_PROXY", "").strip()
 
         if not self.cookie:
             print("[ERROR] 未设置 HUYA_COOKIE")
@@ -59,9 +62,6 @@ class HuYaAuto:
             "--blink-settings=imagesEnabled=false",
         ):
             opts.add_argument(arg)
-        if self.proxy:
-            opts.add_argument(f"--proxy-server={self.proxy}")
-            print("[INIT] 已启用代理")
 
         binary_path = os.getenv("CHROME_BIN", "/usr/bin/google-chrome")
         if os.path.isfile(binary_path):
@@ -96,8 +96,11 @@ class HuYaAuto:
         return driver
 
     # ------------------------------------------------------------------ 工具
-    def _open(self, url):
-        """打开页面；超时则 window.stop() 后继续，不抛异常。"""
+    def _open(self, url, timeout=None):
+        """打开页面；超时则 window.stop() 后继续，不抛异常。
+        timeout 仅对本次加载生效，用于 hd.huya.com 这类较慢的页面。"""
+        if timeout:
+            self.driver.set_page_load_timeout(timeout)
         try:
             self.driver.get(url)
         except TimeoutException:
@@ -106,6 +109,16 @@ class HuYaAuto:
                 self.driver.execute_script("window.stop();")
             except WebDriverException:
                 pass
+        finally:
+            if timeout:
+                self.driver.set_page_load_timeout(cfg.TIMING["page_load_timeout"])
+
+    def _safe_click(self, element):
+        """普通点击被遮罩/浮层拦截时，改用 JS 点击。"""
+        try:
+            element.click()
+        except ElementClickInterceptedException:
+            self.driver.execute_script("arguments[0].click();", element)
 
     def _page_state(self):
         """返回不含敏感信息的页面状态，便于从日志判断失败原因。"""
@@ -195,29 +208,35 @@ class HuYaAuto:
         return False
 
     # ------------------------------------------------------------------ 虎粮
-    def get_hl_count(self):
+    def get_hl_count(self, retries=3):
         """返回虎粮数量；识别失败返回 None（与 0 区分开）。"""
         print("[SEARCH] 正在查询虎粮数量...")
-        try:
-            self._open(cfg.URLS["pay_index"])
-            tab = self.wait.until(
-                EC.element_to_be_clickable((By.ID, cfg.PAY_PAGE["pack_tab"])))
-            tab.click()
-            self.wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "li[data-num]")))
-            n = self.driver.execute_script('''
-                for (const item of document.querySelectorAll('li[data-num]')) {
-                    if ((item.title || item.innerText || '').includes('虎粮'))
-                        return item.getAttribute('data-num');
-                }
-                return 0;
-            ''')
-            count = int(n) if n else 0
-            print(f"[COUNT] 识别到虎粮: {count}")
-            return count
-        except Exception as e:
-            print(f"[ERROR] 虎粮数量识别失败: {type(e).__name__} | {self._page_state()}")
-            return None
+        for attempt in range(1, retries + 1):
+            try:
+                self._open(cfg.URLS["pay_index"], timeout=cfg.TIMING["slow_page_timeout"])
+                # 用 presence 而非 clickable，再配合 JS 点击兜底，避免被浮层拦截
+                tab = self.wait.until(
+                    EC.presence_of_element_located((By.ID, cfg.PAY_PAGE["pack_tab"])))
+                self._safe_click(tab)
+                self.wait.until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "li[data-num]")))
+                n = self.driver.execute_script('''
+                    for (const item of document.querySelectorAll('li[data-num]')) {
+                        if ((item.title || item.innerText || '').includes('虎粮'))
+                            return item.getAttribute('data-num');
+                    }
+                    return 0;
+                ''')
+                count = int(n) if n else 0
+                print(f"[COUNT] 识别到虎粮: {count}")
+                return count
+            except Exception as e:
+                print(f"[WARN] 第 {attempt}/{retries} 次虎粮识别失败: "
+                      f"{type(e).__name__} | {self._page_state()}")
+                if attempt < retries:
+                    time.sleep(3 * attempt)
+        print("[ERROR] 虎粮数量识别最终失败")
+        return None
 
     def send_to_room(self, rid, count):
         if count <= 0:
@@ -229,25 +248,31 @@ class HuYaAuto:
                     'return [document.body && document.body.getAttribute("data-lp"),'
                     '        document.body && document.body.getAttribute("data-gid")]')))
 
-            self._open(cfg.URLS["gift_tab"].format(lp=lp, gid=gid))
+            self._open(cfg.URLS["gift_tab"].format(lp=lp, gid=gid),
+                       timeout=cfg.TIMING["slow_page_timeout"])
             items = self.wait.until(EC.presence_of_all_elements_located(
                 (By.CLASS_NAME, cfg.GIFT["item_class"])))
             hu_liang = next((i for i in items if "虎粮" in i.text), None)
             if not hu_liang:
                 return "❌ 未找到虎粮"
 
-            ActionChains(self.driver).move_to_element(hu_liang).pause(0.5).click().perform()
-            inp = self.wait.until(EC.element_to_be_clickable(
+            try:
+                ActionChains(self.driver).move_to_element(hu_liang).pause(0.5).click().perform()
+            except ElementClickInterceptedException:
+                self.driver.execute_script("arguments[0].click();", hu_liang)
+            inp = self.wait.until(EC.presence_of_element_located(
                 (By.CSS_SELECTOR, cfg.GIFT["input_css"])))
-            inp.click()
+            self._safe_click(inp)
             inp.clear()
             inp.send_keys(str(count))
-            self.wait.until(EC.element_to_be_clickable(
-                (By.CLASS_NAME, cfg.GIFT["send_class"]))).click()
+            send_btn = self.wait.until(EC.presence_of_element_located(
+                (By.CLASS_NAME, cfg.GIFT["send_class"])))
+            self._safe_click(send_btn)
 
             try:  # 部分情况下会弹二次确认
-                WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
-                    (By.CLASS_NAME, cfg.GIFT["confirm_class"]))).click()
+                confirm = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located(
+                    (By.CLASS_NAME, cfg.GIFT["confirm_class"])))
+                self._safe_click(confirm)
             except TimeoutException:
                 pass
 
